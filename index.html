@@ -4,10 +4,10 @@
 :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#091226;color:#f1f7ff;font:16px system-ui,Arial;overflow:hidden}#game{display:block;width:100vw;height:100dvh;touch-action:none}#hud{position:fixed;left:18px;top:12px;display:flex;gap:18px;align-items:center;font-weight:700;pointer-events:none}#status{font-size:12px;font-weight:500;color:#b5c8e6;max-width:60vw}#start{position:fixed;right:16px;top:12px;border:0;border-radius:14px;background:#37dcbd;color:#06231e;padding:11px 18px;font-size:15px;font-weight:750;cursor:pointer}#cam{position:fixed;bottom:12px;right:12px;width:132px;max-width:24vw;border:2px solid #6bdacb;border-radius:12px;transform:scaleX(-1);opacity:.9;background:#10223f}#hint{position:fixed;left:16px;bottom:14px;color:#c1d5ee;font-size:13px;max-width:68vw;pointer-events:none}#video{display:none}@media(max-width:650px){#hud{gap:8px;font-size:14px}#status{max-width:36vw}#start{padding:9px}}
 </style></head><body>
 <canvas id="game"></canvas><div id="hud"><span id="score">Score: 0</span><span id="lives">Lives: 5</span><span id="status">Tap Start to enable camera</span></div><button id="start">Start camera</button><video id="video" autoplay playsinline muted></video><video id="cam" autoplay playsinline muted aria-label="Mirrored camera preview"></video><div id="hint">Move one hand left/right to steer the basket. Touch and drag also works for testing.</div>
-<script type="module">
-import {HandLandmarker,FilesetResolver} from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm';
+<script>
 const canvas=document.querySelector('#game'),ctx=canvas.getContext('2d'),video=document.querySelector('#video'),cam=document.querySelector('#cam');
 const scoreEl=document.querySelector('#score'),livesEl=document.querySelector('#lives'),statusEl=document.querySelector('#status'),startBtn=document.querySelector('#start');
+let HandLandmarker,FilesetResolver;
 let width=innerWidth,height=innerHeight,dpr=1,handLandmarker=null,active=false,score=0,lives=5,targetX=.5,basketX=.5,balls=[],last=performance.now(),spawn=0,lastInfer=0,lastVideoTime=-1,lastHand=0;
 function resize(){width=innerWidth;height=innerHeight;dpr=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);ctx.setTransform(dpr,0,0,dpr,0,0)}addEventListener('resize',resize);resize();
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -25,17 +25,18 @@ function draw(t){const dt=Math.min((t-last)/1000,.05);last=t;ctx.fillStyle='#091
  ctx.fillStyle='#36e1c2';ctx.beginPath();ctx.roundRect(bx-bw/2,by,bw,20,8);ctx.fill();ctx.fillStyle='#8cf7e3';ctx.fillRect(bx-bw/2+8,by+5,bw-16,3);
  if(!active){ctx.fillStyle='#e8f0ff';ctx.font='bold '+Math.min(36,width/18)+'px system-ui';ctx.textAlign='center';ctx.fillText('GESTURE CATCH',width/2,height*.4);ctx.font='17px system-ui';ctx.fillText('Press Start camera to play',width/2,height*.4+36)}
  requestAnimationFrame(draw)}requestAnimationFrame(draw);
-async function cameraAndModel(){startBtn.disabled=true;statusEl.textContent='Requesting front camera…';try{
+async function cameraAndModel(){if(!navigator.mediaDevices?.getUserMedia){statusEl.textContent='Camera API unavailable. Open this page via HTTPS in Chrome.';return;}startBtn.disabled=true;statusEl.textContent='Requesting front camera…';try{
  const stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:24}}});video.srcObject=stream;cam.srcObject=stream;await video.play();await cam.play().catch(()=>{});
- statusEl.textContent='Loading hand-tracking AI…';const vision=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm');handLandmarker=await HandLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:'CPU'},runningMode:'VIDEO',numHands:1,minHandDetectionConfidence:.55,minTrackingConfidence:.55});
+ statusEl.textContent='Loading MediaPipe library…';({HandLandmarker,FilesetResolver}=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm'));statusEl.textContent='Loading hand-tracking AI…';const vision=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm');handLandmarker=await HandLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:'CPU'},runningMode:'VIDEO',numHands:1,minHandDetectionConfidence:.55,minTrackingConfidence:.55});
  reset();active=true;startBtn.textContent='Restart';statusEl.textContent='Show one hand to the front camera';requestAnimationFrame(track);
- }catch(e){statusEl.textContent='Error: '+(e?.message||e)+' — use HTTPS and allow camera';console.error(e)}finally{startBtn.disabled=false}}
+ }catch(e){statusEl.textContent='Error: '+(e?.message||e);startBtn.textContent='Try again';console.error(e)}finally{startBtn.disabled=false}}
 function track(t){if(!active)return;
  if(handLandmarker && video.readyState>=2 && t-lastInfer>=65 && video.currentTime!==lastVideoTime){lastInfer=t;lastVideoTime=video.currentTime;
  try{const res=handLandmarker.detectForVideo(video,t);if(res.landmarks?.length){const pts=res.landmarks[0];const palm=(pts[0].x+pts[5].x+pts[9].x+pts[13].x+pts[17].x)/5;
  // Camera is mirrored for the player; invert x so moving right steers right.
  targetX=clamp(1-palm,.08,.92);lastHand=t;statusEl.textContent='Hand detected ✓'}else if(t-lastHand>1000){statusEl.textContent='Show your hand to the tablet camera'}}catch(e){console.warn(e)}}
  requestAnimationFrame(track)}
-startBtn.addEventListener('click',()=>{if(active){reset();statusEl.textContent='Game restarted';return}cameraAndModel()});
+startBtn.addEventListener('click',()=>{statusEl.textContent='Start pressed';if(active){reset();statusEl.textContent='Game restarted';return}cameraAndModel()});
 canvas.addEventListener('pointermove',e=>{if(e.buttons)targetX=clamp(e.clientX/width,.06,.94)});canvas.addEventListener('pointerdown',e=>{targetX=clamp(e.clientX/width,.06,.94)});
+window.addEventListener('error',e=>{statusEl.textContent='Script error: '+e.message});window.addEventListener('unhandledrejection',e=>{statusEl.textContent='Load error: '+(e.reason?.message||e.reason)});
 </script></body></html>
